@@ -53,7 +53,6 @@
       box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 40px var(--gold-glow);
     }
 
-    /* Header & Badge */
     .header {
       text-align: center;
       margin-bottom: 28px;
@@ -75,7 +74,6 @@
       margin-bottom: 14px;
     }
 
-    /* Animasi Kelap-Kelip */
     .pulse-dot {
       width: 8px;
       height: 8px;
@@ -112,7 +110,6 @@
       color: var(--text-muted);
     }
 
-    /* Form Styles */
     .form-group {
       margin-bottom: 20px;
     }
@@ -176,7 +173,6 @@
       color: var(--gold-light);
     }
 
-    /* Main Action Button */
     .btn-submit {
       width: 100%;
       background: linear-gradient(135deg, var(--gold-primary) 0%, #b89327 100%);
@@ -204,7 +200,6 @@
       transform: translateY(0);
     }
 
-    /* Result Box */
     .result-section {
       display: none;
       margin-top: 28px;
@@ -231,7 +226,14 @@
       font-size: 1.25rem;
       font-weight: 700;
       color: var(--gold-light);
-      margin-bottom: 14px;
+      margin-bottom: 8px;
+    }
+
+    .speech-preview {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-style: italic;
+      margin-bottom: 16px;
     }
 
     .action-group {
@@ -256,7 +258,11 @@
       background: rgba(255, 255, 255, 0.12);
     }
 
-    /* Alert / Validation */
+    .action-btn.btn-voice {
+      border-color: rgba(212, 175, 55, 0.4);
+      color: var(--gold-light);
+    }
+
     .error-text {
       color: var(--danger);
       font-size: 0.8rem;
@@ -300,10 +306,12 @@
 
     <div id="resultSection" class="result-section">
       <div class="amount-display" id="displayAmount">Rp 0</div>
+      <div class="speech-preview" id="speechPreview"></div>
       <div class="qr-frame">
         <div id="qrcode"></div>
       </div>
       <div class="action-group">
+        <button type="button" class="action-btn btn-voice" onclick="speakCurrentAmount()">🔊 Ulangi Suara</button>
         <button type="button" class="action-btn" onclick="copyPayload()">Salin Payload</button>
         <button type="button" class="action-btn" onclick="resetForm()">Reset</button>
       </div>
@@ -312,6 +320,7 @@
 
   <script>
     let generatedPayload = "";
+    let currentNominalValue = 0;
 
     // Format Rupiah Input
     const nominalInput = document.getElementById('nominal');
@@ -322,6 +331,66 @@
 
     function setNominal(amount) {
       nominalInput.value = amount.toLocaleString('id-ID');
+    }
+
+    // Engine Konversi Angka ke Terbilang Bahasa Indonesia
+    function numberToWords(number) {
+      const units = ["", "Satu", "Dua", "Tiga", "Empat", "Lima", "Enam", "Tujuh", "Delapan", "Sembilan", "Sepuluh", "Sebelas"];
+      const n = Math.floor(number);
+
+      if (n < 12) {
+        return units[n];
+      } else if (n < 20) {
+        return numberToWords(n - 10) + " Belas";
+      } else if (n < 100) {
+        return numberToWords(Math.floor(n / 10)) + " Puluh " + units[n % 10];
+      } else if (n < 200) {
+        return "Seratus " + numberToWords(n - 100);
+      } else if (n < 1000) {
+        return numberToWords(Math.floor(n / 100)) + " Ratus " + numberToWords(n % 100);
+      } else if (n < 2000) {
+        return "Seribu " + numberToWords(n - 1000);
+      } else if (n < 1000000) {
+        return numberToWords(Math.floor(n / 1000)) + " Ribu " + numberToWords(n % 1000);
+      } else if (n < 1000000000) {
+        return numberToWords(Math.floor(n / 1000000)) + " Juta " + numberToWords(n % 1000000);
+      } else if (n < 1000000000000) {
+        return numberToWords(Math.floor(n / 1000000000)) + " Miliar " + numberToWords(n % 1000000000);
+      }
+      return "";
+    }
+
+    // Engine Suara (Web Speech API Native)
+    function speakAmount(amount) {
+      if (!('speechSynthesis' in window)) {
+        console.warn("Browser tidak mendukung Web Speech API");
+        return;
+      }
+
+      window.speechSynthesis.cancel(); // Stop suara aktif sebelumnya
+
+      const words = numberToWords(amount).trim();
+      const speechText = `Total pembayaran sebesar ${words} rupiah.`;
+      
+      const utterance = new SpeechSynthesisUtterance(speechText);
+      utterance.lang = 'id-ID';
+      utterance.rate = 0.95;
+      utterance.pitch = 1.0;
+
+      // Prioritaskan suara bahasa Indonesia jika tersedia
+      const voices = window.speechSynthesis.getVoices();
+      const idVoice = voices.find(v => v.lang.includes('id') || v.lang.includes('ID'));
+      if (idVoice) {
+        utterance.voice = idVoice;
+      }
+
+      window.speechSynthesis.speak(utterance);
+    }
+
+    function speakCurrentAmount() {
+      if (currentNominalValue > 0) {
+        speakAmount(currentNominalValue);
+      }
     }
 
     // Algoritma Checksum CRC16-CCITT (0xFFFF)
@@ -344,29 +413,23 @@
     function generateDynamicQRIS(staticQris, amount) {
       let qris = staticQris.trim();
       
-      // Validasi struktur dasar EMVCo
       if (!qris.startsWith("000201")) {
         throw new Error("Payload QRIS tidak valid (harus dimulai dengan 000201)");
       }
 
-      // Potong checksum lama (Tag 63)
       const tag63Index = qris.indexOf("6304");
       if (tag63Index !== -1) {
         qris = qris.substring(0, tag63Index);
       }
 
-      // Ubah Tag 01 (Static: 010211 -> Dynamic: 010212)
       qris = qris.replace("010211", "010212");
 
-      // Format Tag 54 (Transaction Amount)
       const amountStr = amount.toString();
       const amountLength = amountStr.length.toString().padStart(2, '0');
       const tag54 = `54${amountLength}${amountStr}`;
 
-      // Hapus Tag 54 lama jika ada
       qris = qris.replace(/54\d{2}\d+/, '');
 
-      // Sisipkan Tag 54 sebelum Tag 58 (Country Code ID)
       const tag58Pos = qris.indexOf("5802ID");
       if (tag58Pos !== -1) {
         qris = qris.substring(0, tag58Pos) + tag54 + qris.substring(tag58Pos);
@@ -374,7 +437,6 @@
         qris = qris + tag54;
       }
 
-      // Hitung CRC16 baru dengan penambahan Tag 6304
       const payloadWithoutCRC = qris + "6304";
       const newCRC = calculateCRC16(payloadWithoutCRC);
 
@@ -395,7 +457,9 @@
       }
 
       try {
-        generatedPayload = generateDynamicQRIS(rawQris, Number(nominalRaw));
+        const amountNum = Number(nominalRaw);
+        currentNominalValue = amountNum;
+        generatedPayload = generateDynamicQRIS(rawQris, amountNum);
         
         // Render QR Code
         const qrContainer = document.getElementById('qrcode');
@@ -409,10 +473,15 @@
           correctLevel: QRCode.CorrectLevel.M
         });
 
-        // Tampilkan Result Box
-        document.getElementById('displayAmount').textContent = `Total: Rp ${Number(nominalRaw).toLocaleString('id-ID')}`;
+        // Update Text Display & Speech Preview
+        const words = numberToWords(amountNum).trim();
+        document.getElementById('displayAmount').textContent = `Total: Rp ${amountNum.toLocaleString('id-ID')}`;
+        document.getElementById('speechPreview').textContent = `"${words} Rupiah"`;
         document.getElementById('resultSection').style.display = 'block';
         document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
+
+        // Trigger Efek Suara
+        speakAmount(amountNum);
 
       } catch (err) {
         errorLabel.textContent = err.message;
@@ -428,10 +497,19 @@
     }
 
     function resetForm() {
+      window.speechSynthesis.cancel();
       document.getElementById('qrisForm').reset();
       document.getElementById('resultSection').style.display = 'none';
       document.getElementById('qrcode').innerHTML = '';
       generatedPayload = "";
+      currentNominalValue = 0;
+    }
+
+    // Preload voice list
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
     }
   </script>
 </body>
